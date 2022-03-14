@@ -1,10 +1,14 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
-import 'package:rocket_chat_client/api.dart';
-import 'package:rocket_chat_client/rocket_chat_user.dart';
+import 'package:rocket_chat_client/pages/direct_chat.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
+import 'api.dart';
+import 'channel_item.dart';
+import 'helper.dart';
+import 'rocket_chat/models.dart';
 
 void main() {
   runApp(const MyApp());
@@ -39,26 +43,13 @@ class _MyHomePageState extends State<MyHomePage> {
   final _userController = TextEditingController();
   final _passController = TextEditingController();
   final _api = Api();
-  RocketChatUser? _user;
+  User? _user;
   bool _loading = false;
 
   final _channel = WebSocketChannel.connect(
     Uri.parse('ws://10.1.38.174:3000/websocket'),
   );
   late StreamSubscription _streamSubscription;
-
-  final _connectMsg = <String, dynamic>{
-    'msg': 'connect',
-    'version': '1',
-    'support': ['1', 'pre2', 'pre1']
-  };
-  final _pongMsg = <String, String>{'msg': 'pong'};
-
-  final _getRoomsMsg = {
-    "msg": "method",
-    "method": "rooms/get",
-    "id": "42",
-  };
 
   late StreamController messageStream;
 
@@ -79,95 +70,147 @@ class _MyHomePageState extends State<MyHomePage> {
       ),
       body: Container(
         padding: const EdgeInsets.all(20.0),
-        child: Column(
-          children: [
-            _user == null
-                ? Form(
-                    child: Column(
-                      children: [
-                        TextFormField(
-                          controller: _userController,
-                          decoration: const InputDecoration(labelText: 'user'),
-                        ),
-                        TextFormField(
-                          controller: _passController,
-                          decoration:
-                              const InputDecoration(labelText: 'password'),
-                        ),
-                        ElevatedButton(
-                            onPressed: () async {
-                              setState(() {
-                                _loading = true;
-                              });
-                              final result = await _api.login(
-                                user: _userController.text.trim(),
-                                password: _passController.text.trim(),
-                              );
-
-                              setState(() {
-                                _loading = false;
-                              });
-                              if (result != null) {
-                                setState(() {
-                                  _user = result;
-                                });
-                              }
-                            },
-                            child: Text('Login')),
-                        _loading ? CircularProgressIndicator() : SizedBox(),
-                      ],
+        child: _user == null
+            ? Column(
+                children: [
+                  TextFormField(
+                    controller: _userController,
+                    decoration: const InputDecoration(
+                      labelText: 'user',
+                      hintText: 'username/email',
                     ),
-                  )
-                : Column(
-                    mainAxisSize: MainAxisSize.min,
+                  ),
+                  TextFormField(
+                    controller: _passController,
+                    decoration: const InputDecoration(labelText: 'password'),
+                  ),
+                  ElevatedButton(
+                      onPressed: () async {
+                        setState(() {
+                          _loading = true;
+                        });
+                        final result = await _api.login(
+                          user: _userController.text.trim(),
+                          password: _passController.text.trim(),
+                        );
+
+                        setState(() {
+                          _loading = false;
+                        });
+                        if (result != null) {
+                          setState(() {
+                            _user = result;
+                          });
+                        }
+                      },
+                      child: Text('Login')),
+                  _loading ? CircularProgressIndicator() : SizedBox(),
+                ],
+              )
+            : Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('username: ${_user!.me.username}'),
+                  Text('userId: ${_user!.userId}'),
+                  Text('authToken: ${_user!.authToken}'),
+                  Wrap(
                     children: [
-                      Text('username: ${_user!.me.username}'),
-                      Text('userId: ${_user!.userId}'),
-                      Text('authToken: ${_user!.authToken}'),
-                      Wrap(
-                        children: [
-                          ElevatedButton(
-                              onPressed: () {
-                                _channel.sink.add(jsonEncode(_connectMsg));
-                              },
-                              child: Text('connect')),
-                          ElevatedButton(
-                              onPressed: () {
-                                _channel.sink.add(jsonEncode({
-                                  "msg": "sub",
-                                  "id": "unique-id",
-                                  "name": "the-stream",
-                                  "params": ["event", false]
-                                }));
-                              },
-                              child: Text('subscribe')),
-                          ElevatedButton(
-                              onPressed: () {
-                                _channel.sink.add(jsonEncode({
-                                  "msg": "method",
-                                  "method": "rooms/get",
-                                  "id": _user!.userId,
-                                }));
-                              },
-                              child: Text('get rooms')),
-                          ElevatedButton(
-                              onPressed: () {
-                                // _channel.sink.add(jsonEncode(_getRoomsMsg));
-                              },
-                              child: Text('gfgh')),
-                        ],
-                      ),
+                      ElevatedButton(
+                          onPressed: () {
+                            _channel.sink.add(Helper.connectMsg());
+                          },
+                          child: const Text('connect')),
+                      ElevatedButton(
+                          onPressed: () {
+                            _channel.sink.add(Helper.subscribeMsg());
+                          },
+                          child: const Text('subscribe')),
+                      ElevatedButton(
+                          onPressed: () {
+                            _channel.sink.add(Helper.getRoomsMsg());
+                          },
+                          child: const Text('get rooms')),
                     ],
                   ),
-            const SizedBox(height: 24),
-            StreamBuilder(
-              stream: messageStream.stream,
-              builder: (context, snapshot) {
-                return Text(snapshot.hasData ? '${snapshot.data}' : '');
-              },
-            ),
-          ],
-        ),
+                  Expanded(
+                    child: Container(
+                      child: FutureBuilder(
+                        future: _api.getListRooms(
+                            authToken: _user!.authToken, userId: _user!.userId),
+                        builder: (context, snapshot) {
+                          if (!snapshot.hasData) {
+                            return CircularProgressIndicator();
+                          }
+
+                          final listRooms = snapshot.data as List<Room>;
+                          final directMsgRoom = listRooms
+                              .where((element) => element.isDirectMsgRoom)
+                              .toList();
+                          final channels = listRooms
+                              .where((element) => !element.isDirectMsgRoom)
+                              .toList();
+
+                          final content = [
+                            const Text(
+                              'Channels',
+                              style: TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                            ...channels
+                                .map((e) => ChannelItem(
+                                      room: e,
+                                      curUser: _user!,
+                                      onTap: () {},
+                                    ))
+                                .toList(),
+                            const Text(
+                              'Direct Messages',
+                              style: TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                            ...directMsgRoom
+                                .map((e) => ChannelItem(
+                                      room: e,
+                                      curUser: _user!,
+                                      onTap: () {
+                                        Navigator.push(
+                                            context,
+                                            CupertinoPageRoute(
+                                                builder: (context) =>
+                                                    DirectChat(
+                                                      userId: e.targetUserId(
+                                                          curUid:
+                                                              _user!.userId),
+                                                      username:
+                                                          e.targetUsername(
+                                                              curUname: _user!
+                                                                  .me.username),
+                                                    )));
+                                      },
+                                    ))
+                                .toList(),
+                          ];
+
+                          return SingleChildScrollView(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: content,
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  Container(
+                    height: 100,
+                    child: StreamBuilder(
+                      stream: messageStream.stream,
+                      builder: (context, snapshot) {
+                        return Text(snapshot.hasData ? '${snapshot.data}' : '');
+                      },
+                    ),
+                  ),
+                ],
+              ),
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: () {
@@ -193,7 +236,7 @@ class _MyHomePageState extends State<MyHomePage> {
     final json = _parse(message);
     final msg = json['msg'];
     if (msg == 'ping') {
-      _channel.sink.add(jsonEncode(_pongMsg));
+      _channel.sink.add(Helper.pongMsg());
       print('-- handled ping msg');
     } else if (msg == 'connected') {
       print('--session: ${json['session']}');

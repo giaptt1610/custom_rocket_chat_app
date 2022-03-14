@@ -1,16 +1,16 @@
-class RocketChatUser {
+class User {
   final String userId;
   final String authToken;
   final Me me;
 
-  RocketChatUser({
+  User({
     required this.userId,
     required this.authToken,
     required this.me,
   });
 
-  factory RocketChatUser.fromJson(Map<String, dynamic> json) {
-    return RocketChatUser(
+  factory User.fromJson(Map<String, dynamic> json) {
+    return User(
       userId: json['userId'] as String,
       authToken: json['authToken'] as String,
       me: Me.fromJson(json['me'] as Map<String, dynamic>),
